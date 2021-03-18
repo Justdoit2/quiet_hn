@@ -31,39 +31,86 @@ func main() {
 }
 
 func handler(numStories int, tpl *template.Template) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		var client hn.Client
-		ids, err := client.TopItems()
-		if err != nil {
-			http.Error(w, "Failed to load top stories", http.StatusInternalServerError)
-			return
-		}
-		var stories []item
-		for _, id := range ids {
-			hnItem, err := client.GetItem(id)
-			if err != nil {
-				continue
-			}
-			item := parseHNItem(hnItem)
-			if isStoryLink(item) {
-				stories = append(stories, item)
-				if len(stories) >= numStories {
-					break
-				}
-			}
-		}
-		data := templateData{
-			Stories: stories,
-			Time:    time.Now().Sub(start),
-		}
-		err = tpl.Execute(w, data)
-		if err != nil {
-			http.Error(w, "Failed to process the template", http.StatusInternalServerError)
-			return
-		}
-	})
+
+    sc:=switchCache{
+        numStories: numStories,
+        cacheDureation:  3* time.Second,
+    }
+   go func(){ //prevent running into slow page load
+        ticker:=time.NewTicker(3 * time.Second)
+        for {
+        
+            temp:=switchCache{
+                numStories:numStories,
+                cacheDureation: 6* time.Second,
+            }
+            temp.stories()
+            sc.cacheMutex.Lock()
+            sc.cache=temp.cache
+            sc.cacheExpiration=temp.cacheExpiration
+            sc.cacheMutex.Unlock()//overwriting data and unlocking, so user should not see refresh delay
+             <-ticker.C                   
+        }
+   }()
+
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        stories, err := getCachedstories(sc.numStories) /*numStories =30 */
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+        }
+        data := templateData{
+            Stories: stories,
+            Time:    time.Now().Sub(start),
+        }
+        err = tpl.Execute(w, data)
+        if err != nil {
+            http.Error(w, "Failed to process the template", http.StatusInternalServerError)
+            return
+        }
+    })
 }
+
+
+
+/* Bonus exercise */
+
+type switchCache struct{
+    cache []item
+    numStories int
+    useA bool
+    cacheDureation time.Duration
+    cacheExpiration time.Time
+    cacheMutex sync.Mutex
+
+
+}
+
+func (sc * switchCache) stories()([]item,error){
+    sc.cacheMutex.Lock()
+    
+
+    //the web request
+    defer sc.cacheMutex.Unlock() //eliminate api alls
+
+    if time.Now().Sub(sc.cacheExpiration)< 0{//current_time.Sub(given_time)
+        return sc.cache,nil
+            
+    }
+
+    stories, err := getTopStories(sc.numStories) /*numStories =30 */
+    sc.cacheExpiration=time.Now().Add(sc.cacheDureation)
+    if err!=nil{
+     return nil, err
+    }
+    sc.cache=stories
+        return sc.cache,nil
+
+    
+
+}
+
+
 
 /* Add caching ->increase from seconds->milliseconds->nanoseconds*/
 
