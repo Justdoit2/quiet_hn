@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ExploreCaching/quiet_hn/hn"
 	"flag"
 	"fmt"
 	"html/template"
@@ -9,8 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/gophercises/quiet_hn/hn"
 )
 
 func main() {
