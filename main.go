@@ -2,6 +2,7 @@ package main
 
 import (
 	"ExploreCaching/quiet_hn/hn"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -63,6 +65,54 @@ func handler(numStories int, tpl *template.Template) http.HandlerFunc {
 	})
 }
 
+/* Add caching ->increase from seconds->milliseconds->nanoseconds*/
+
+var (
+    cache []item
+    cacheExperiation time.Time
+    cacheMutex sync.Mutex
+)
+
+func getCachedstories(numStories int) ([]item, error){
+    cacheMutex.Lock()//2nd goroutine will sit/wait until the current gorountine unlocks when updating
+    //the web request
+    defer cacheMutex.Unlock() //eliminate api alls
+
+    if time.Now().Sub(cacheExperiation)< 0{//current_time.Sub(given_time)
+                  return cache,nil
+    }
+    stories, err := getTopStories(numStories) /*numStories =30 */
+    if err!=nil{
+     return nil, err
+    }
+    cache=stories
+    cacheExperiation=time.Now().Add(15*time.Second)//whenever cache expires, will have an initial slow load agian
+    return cache, nil
+}
+
+
+
+func getTopStories(numStories int) ([]item, error) {
+    var client hn.Client
+    ids, err := client.TopItems()
+    if err != nil {
+        return nil, errors.New("Failed to load top stories")
+
+    }
+    /*Retrieve Stories*/
+    var stories []item
+    at := 0
+    for len(stories) < numStories {
+        need := numStories - len(stories)
+        stories = append(stories, getStories(ids[at:at+need])...)
+
+        at += need //increment through array
+        //fmt.Println("the stories", stories)
+    }
+
+    return stories, nil
+    /**/
+}
 
 
 func getStories(ids []int) []item {
