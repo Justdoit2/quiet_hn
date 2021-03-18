@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -61,6 +62,55 @@ func handler(numStories int, tpl *template.Template) http.HandlerFunc {
 		}
 	})
 }
+
+
+
+func getStories(ids []int) []item {
+	var stories []item
+	//var client hn.Client //add the client inside the gorountine to eliminate race conditions
+
+	type result struct {
+		idx  int
+		item item
+		err  error
+	}
+
+	resultCh := make(chan result)
+	for i := 0; i < len(ids); i++ {
+		go func(idx, id int) {
+			var client hn.Client
+			hnItem, err := client.GetItem(id)//this is where race condition occurs, one gourotine checking client and another assining 
+			if err != nil {
+				resultCh <- result{idx: idx, err: err}
+			}
+			resultCh <- result{idx: idx, item: parseHNItem(hnItem)} //pass into Channel
+		}(i, ids[i])
+	}
+
+	var results []result
+	for i := 0; i < len(ids); i++ {
+		results = append(results, <-resultCh)
+	}
+
+	sort.Slice(results, func(i, j int) bool {//sort listing
+		//fmt.Println(results[i].item.Title, "vs",results[j].item.Title)
+		return results[i].idx < results[j].idx
+	})
+
+	for _, res := range results {
+		if res.err != nil {
+			continue
+		}
+		if isStoryLink(res.item) {
+			stories = append(stories, res.item)
+
+		}
+	}
+
+	return stories
+}
+
+
 
 func isStoryLink(item item) bool {
 	return item.Type == "story" && item.URL != ""
